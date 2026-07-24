@@ -1,0 +1,74 @@
+pipeline {
+    agent any
+
+    environment {
+        CHECKOUT_DIR = "/opt/checkout/react-todo-add"
+        DEPLOY_DIR = "/opt/deployment/react"
+        S3_BUCKET = "react-todo-artifacts"
+    }
+
+    stages {
+
+        stage('Stop Running Deployment') {
+            steps {
+                sh '''
+                pm2 delete react-todo-app || true
+                '''
+            }
+        }
+
+        stage('Pull Fresh Code') {
+            steps {
+                dir("${CHECKOUT_DIR}") {
+                    sh '''
+                    git reset --hard
+                    git pull origin master
+                    '''
+                }
+            }
+        }
+
+        stage('Build Project') {
+            steps {
+                dir("${CHECKOUT_DIR}") {
+                    sh '''
+                    npm install
+                    npm run build
+
+                    sudo mkdir -p ${DEPLOY_DIR}
+                    sudo cp -r build/* ${DEPLOY_DIR}/
+                    '''
+                }
+            }
+        }
+
+        stage('Deploy using PM2') {
+            steps {
+                dir("${DEPLOY_DIR}") {
+                    sh '''
+                    pm2 serve . 3000 --spa --name react-todo-app
+                    pm2 save
+                    '''
+                }
+            }
+        }
+
+        stage('Upload Build to S3') {
+            steps {
+                sh '''
+                aws s3 sync ${DEPLOY_DIR} s3://${S3_BUCKET}
+                '''
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Deployment Successful'
+        }
+
+        failure {
+            echo 'Deployment Failed'
+        }
+    }
+}
